@@ -61,23 +61,60 @@ def extraer_imports_con_prefijo(scala_path: Path, prefix: str) -> list:
                     resultados.append(imp)
     return resultados
 
-def get_project_package(project_path, file_path):
-    dir_rel = file_path\
-        .replace(project_path, '')\
-        .replace(os.sep + 'src' + os.sep, os.sep)\
-        .replace(os.sep + 'main' + os.sep, os.sep)\
-        .replace(os.sep + 'scala' + os.sep, os.sep)\
-        .strip(os.sep)
-    dir_divided = os.path.dirname(dir_rel)\
-        .split(os.sep)
+import os
+import re
 
+def get_project_package(project_path, file_path):
+    # 1) Compute package from file path
+    dir_rel = (
+        file_path
+        .replace(project_path, '')
+        .replace(os.sep + 'src' + os.sep, os.sep)
+        .replace(os.sep + 'main' + os.sep, os.sep)
+        .replace(os.sep + 'scala' + os.sep, os.sep)
+        .strip(os.sep)
+    )
+    dir_divided = os.path.dirname(dir_rel).split(os.sep)
     pack = ".".join(dir_divided)
+
     imports = []
-    if not pack == "":
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            for line in f:
-                if "import" in line and pack in line:
-                    imports.append[line.split(" ")[1]]
+    if not pack:
+        return imports
+
+    # 2) Precompile regexes
+    # matches 'import some.pkg.{A,B,C}'
+    brace_re = re.compile(r'''
+        ^import \s+           # import keyword
+        (?P<pkg>[\w\.]+)      # package prefix, e.g. some.pkg
+        \.\{                   # literal .{
+        (?P<elems>[^}]+)       # everything up to closing }
+        \}                     # closing brace
+        ''', re.VERBOSE)
+
+    # matches simple 'import some.pkg.Foo'
+    simple_re = re.compile(r'^import\s+(?P<pkg>[\w\.]+)')
+
+    # 3) Scan lines
+    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+        for raw in f:
+            line = raw.strip()
+            # only care about imports that mention our package
+            if not line.startswith('import') or pack not in line:
+                continue
+
+            # 3a) curly‐brace expansion
+            m = brace_re.match(line)
+            if m:
+                base = m.group('pkg')                # e.g. com.paquete.funcion
+                elems = m.group('elems').split(',')  # ['CosaA', 'CosaB', 'CosaC']
+                for e in elems:
+                    imports.append(f"{base}.{e.strip()}")
+                continue
+
+            # 3b) simple import
+            m2 = simple_re.match(line)
+            if m2:
+                imports.append(m2.group('pkg'))
 
     return imports
 
